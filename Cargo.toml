@@ -6,4 +6,5 @@ description = "A library to compute Delaunay triangulations and Voronoi diagrams
 repository = "https://github.com/mdsherry/delaunay2d"
 keywords = ["delaunay", "voronoi"]
 readme = "README.md"
+license = "MIT"
 [dependencies]

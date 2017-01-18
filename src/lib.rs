@@ -11,13 +11,13 @@ extern crate delaunay2d;
 
 # Example: Delaunay triangulation
 ```rust
-use delaunay2d::{Delaunay2D, Point, Triangle};
-let mut dt = Delaunay2D::new(Point::new(0., 0.), 9999.);
+use delaunay2d::{Delaunay2D, Triangle};
+let mut dt = Delaunay2D::new((0., 0.), 9999.);
 
-dt.add_point(Point::new(13., 12.));
-dt.add_point(Point::new(18., 19.));
-dt.add_point(Point::new(21., 5.));
-dt.add_point(Point::new(37., -3.));
+dt.add_point((13., 12.));
+dt.add_point((18., 19.));
+dt.add_point((21., 5.));
+dt.add_point((37., -3.));
 
 let mut triangles = dt.export_triangles();
 triangles.sort_by_key(|t| (t.0, t.1, t.2));
@@ -25,13 +25,13 @@ assert_eq!(vec![Triangle(2,1,0), Triangle(3, 1, 2)], triangles);
 ```
 # Example: Voronoi regions
 ```rust
-use delaunay2d::{Delaunay2D, Point};
-let mut dt = Delaunay2D::new(Point::new(0., 0.), 9999.);
+use delaunay2d::{Delaunay2D};
+let mut dt = Delaunay2D::new((0., 0.), 9999.);
 
-dt.add_point(Point::new(13., 12.));
-dt.add_point(Point::new(18., 19.));
-dt.add_point(Point::new(21., 5.));
-dt.add_point(Point::new(37., -3.));
+dt.add_point((13., 12.));
+dt.add_point((18., 19.));
+dt.add_point((21., 5.));
+dt.add_point((37., -3.));
 
 let (points, mut regions) = dt.export_voronoi_regions();
 regions.sort();
@@ -60,7 +60,7 @@ fn prev_idx(n: usize, m: usize) -> usize {
 
 /// Represents an (X, Y) coordinate
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Point {
+struct Point {
     pub x: f64,
     pub y: f64,
 }
@@ -94,7 +94,7 @@ impl Sub for Point {
     }
 }
 
-// The triangles opposite to each vertex, if any.
+/// The triangles opposite to each vertex, if any.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TNeighbours(pub Option<Triangle>, pub Option<Triangle>, pub Option<Triangle>);
 
@@ -141,6 +141,12 @@ impl TNeighbours {
                         Some(t)
                     }))
     }
+
+    fn munge_indices(&self) -> TNeighbours {
+        TNeighbours(self.0.map(|t| t.munge_indices()),
+                    self.1.map(|t| t.munge_indices()),
+                    self.2.map(|t| t.munge_indices()))
+    }
 }
 
 #[derive(Debug)]
@@ -172,13 +178,21 @@ impl Triangle {
     fn is_bounding_triangle(&self) -> bool {
         self.0 <= 3 || self.1 <= 3 || self.2 <= 3
     }
+
+    fn munge_indices(&self) -> Self {
+        Triangle(self.0 - 4, self.1 - 4, self.2 - 4)
+    }
+    fn demunge_indices(&self) -> Self {
+        Triangle(self.0 + 4, self.1 + 4, self.2 + 4)
+    }
 }
 
 impl Delaunay2D {
     /// Builds a new Delaunay triangulator.
     /// All points added to the triangulator must fall within the bounding box
     /// centered at `center` and extending in `radius` in each direction
-    pub fn new(center: Point, radius: f64) -> Delaunay2D {
+    pub fn new(center: (f64, f64), radius: f64) -> Delaunay2D {
+        let center = Point::new(center.0, center.1);
         let coords = vec![Point {
                               x: center.x - radius,
                               y: center.y - radius,
@@ -230,7 +244,8 @@ impl Delaunay2D {
 
     /// Adds a point to the triangulation.
     #[allow(while_true)]
-    pub fn add_point(&mut self, p: Point) {
+    pub fn add_point(&mut self, p: (f64, f64)) {
+        let p = Point::new(p.0, p.1);
         let idx = self.coords.len();
         self.coords.push(p);
 
@@ -306,31 +321,34 @@ impl Delaunay2D {
             .keys()
             .filter(|t| t.0 > 3 && t.1 > 3 && t.2 > 3)
             .cloned()
-            .map(|t| Triangle(t.0 - 4, t.1 - 4, t.2 - 4))
+            .map(|t| t.munge_indices())
             .collect()
     }
 
     /// Returns the neighbours of a given triangle.
     /// The first neighbour is adjacent to the edge *opposite* the first vertex, etc.
     pub fn get_adjacent(&self, t: &Triangle) -> Option<TNeighbours> {
-        self.triangles.get(t).map(|t| t.remove_bounding_triangles())
+        // Because we munge outgoing triangles, we need to demunge them to look them up
+        let demunged = t.demunge_indices();
+        self.triangles.get(&demunged).map(|t| t.remove_bounding_triangles().munge_indices())
     }
 
     /// Returns the list of points added to the triangulation.
-    pub fn export_points(&self) -> Vec<Point> {
-        self.coords.iter().skip(4).cloned().collect()
+    pub fn export_points(&self) -> Vec<(f64, f64)> {
+        self.coords.iter().skip(4).map(|p| (p.x, p.y)).collect()
     }
 
     /// Returns the vertices of the Voronoi regions, and the indices of vertices forming
     /// each region.
-    pub fn export_voronoi_regions(&self) -> (Vec<Point>, Vec<Vec<usize>>) {
+    pub fn export_voronoi_regions(&self) -> (Vec<(f64, f64)>, Vec<Vec<usize>>) {
         let mut use_vertex =
             (0..self.coords.len()).map(|_| -> Vec<Triangle> { vec![] }).collect::<Vec<_>>();
         let mut index: HashMap<Triangle, usize> = HashMap::new();
         let mut vor_coors = vec![];
         for (tidx, t) in self.triangles.keys().enumerate() {
             let Triangle(a, b, c) = *t;
-            vor_coors.push(self.circles[t].0);
+            let circle_center = self.circles[t].0;
+            vor_coors.push((circle_center.x, circle_center.y));
             // Insert triangle, rotating it so the key is the "last" vertex
             use_vertex[a].push(Triangle(b, c, a));
             use_vertex[b].push(Triangle(c, a, b));
@@ -392,13 +410,12 @@ impl Triangle {
 #[cfg(test)]
 mod tests {
     use Delaunay2D;
-    use Point;
     use Triangle;
     use TNeighbours;
     #[test]
     fn it_works() {
-        let mut delaunay = Delaunay2D::new(Point::new(0., 0.), 9999.);
-        delaunay.add_point(Point::new(13., 12.));
+        let mut delaunay = Delaunay2D::new((0., 0.), 9999.);
+        delaunay.add_point((13., 12.));
         for &(t, tstruct) in [(Triangle(4, 0, 1),
                                TNeighbours(None,
                                            Some(Triangle(4, 1, 2)),
@@ -421,7 +438,7 @@ mod tests {
             assert_eq!(tstruct, ts);
         }
 
-        delaunay.add_point(Point::new(18., 19.));
+        delaunay.add_point((18., 19.));
         for &(t, tstruct) in [(Triangle(4, 0, 1),
                                TNeighbours(None,
                                            Some(Triangle(5, 4, 1)),
@@ -452,7 +469,7 @@ mod tests {
             assert_eq!(tstruct, ts);
         }
 
-        delaunay.add_point(Point::new(21., 5.));
+        delaunay.add_point((21., 5.));
         for &(t, tstruct) in [(Triangle(6, 2, 5),
                                TNeighbours(Some(Triangle(5, 2, 3)),
                                            Some(Triangle(6, 5, 4)),
@@ -492,7 +509,7 @@ mod tests {
         }
 
 
-        delaunay.add_point(Point::new(37., -3.));
+        delaunay.add_point((37., -3.));
 
         for &(t, tstruct) in [(Triangle(5, 2, 3),
                                TNeighbours(None,
@@ -545,10 +562,27 @@ mod tests {
 
     #[test]
     fn adjacent_triangles() {
-        let mut delaunay = Delaunay2D::new(Point::new(0., 0.), 100.);
-        delaunay.add_point(Point::new(1., 1.));
-        delaunay.add_point(Point::new(3., 1.));
-        delaunay.add_point(Point::new(1., 3.));
+        let mut delaunay = Delaunay2D::new((0., 0.), 100.);
+        delaunay.add_point((1., 1.));
+        delaunay.add_point((3., 1.));
+        delaunay.add_point((1., 3.));
+        let triangles = delaunay.export_triangles();
+        assert_eq!(1, triangles.len());
+        let t = triangles[0];
+        assert_eq!(Some(TNeighbours(None, None, None)),
+                   delaunay.get_adjacent(&t));
+        assert_eq!(None, delaunay.get_adjacent(&Triangle(1, 2, 4)));
+
+        delaunay.add_point((3., 3.));
+        let mut triangles = delaunay.export_triangles();
+        assert_eq!(2, triangles.len());
+        triangles.sort_by_key(|t| (t.0, t.1, t.2));
+        let t = triangles[0];
+        assert_eq!(Triangle(3, 0, 1), t);
+        assert_eq!(Some(TNeighbours(None, None, Some(Triangle(3, 2, 0)))),
+                   delaunay.get_adjacent(&t));
+
+        assert_eq!(None, delaunay.get_adjacent(&Triangle(1, 2, 4)));
 
     }
 }

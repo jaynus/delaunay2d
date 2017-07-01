@@ -369,7 +369,7 @@ impl Delaunay2D {
             for _ in 0..vertex.len() {
                 // Search the triangle beginning with vertex v
                 let t = vertex.iter().find(|&t| t.0 == v).unwrap();
-                r.push(t.1); // Add the index of this triangle to region
+                r.push(index[&t]); // Add the index of this triangle to region
                 v = t.1; // Choose the next vertex to search
             }
             regions.push(r); // Store region.

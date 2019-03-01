@@ -348,6 +348,7 @@ impl Delaunay2D {
         for (tidx, t) in self.triangles.keys().enumerate() {
             let Triangle(a, b, c) = *t;
             let circle_center = self.circles[t].0;
+
             vor_coors.push((circle_center.x, circle_center.y));
             // Insert triangle, rotating it so the key is the "last" vertex
             use_vertex[a].push(Triangle(b, c, a));
